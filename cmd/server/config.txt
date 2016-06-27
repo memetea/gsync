@@ -1,0 +1,9 @@
+{
+    "listen": ":8088",
+    "cachedir": "cache",
+    "apps" : {
+        "client" : {
+            "dir": "publish/client"
+        }
+    }
+}

@@ -2,7 +2,6 @@ package gsync
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"crypto/md5"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"time"
 )
 
+//Diff Describes a difference between two files
 type Diff struct {
 	NewHash string
 	OldHash string
@@ -23,10 +23,16 @@ type Diff struct {
 	ModTime time.Time
 }
 
+//DiffMap Holds differences
 type DiffMap map[string]Diff
 
+type Response struct {
+	PatchFile string
+	PatchSize int64
+	Diff      DiffMap
+}
+
 func calcDiff(stripdir, curdir string, req *Request, diffMap DiffMap) error {
-	fmt.Printf("calc diff for %s\n", curdir)
 	fis, err := ioutil.ReadDir(curdir)
 	if err != nil {
 		return err
@@ -64,6 +70,7 @@ func calcDiff(stripdir, curdir string, req *Request, diffMap DiffMap) error {
 	return nil
 }
 
+//CalcDiff calcs diffrence on req with cmpdir
 func CalcDiff(cmpdir string, req *Request) (DiffMap, error) {
 	diffMap := make(DiffMap)
 	cmpdir = normpath(path.Clean(cmpdir))
@@ -74,17 +81,26 @@ func CalcDiff(cmpdir string, req *Request) (DiffMap, error) {
 	return diffMap, err
 }
 
-func PrepareDiff(rootdir string, diff DiffMap) (string, error) {
-	//concat hash
-	var buf bytes.Buffer
-	for _, v := range diff {
-		buf.WriteString(v.NewHash)
+func CalcDiffOnFolders(cmpfrom string, cmpto string) (DiffMap, error) {
+	//calc request on cmpfrom
+	req, err := MakeRequest(cmpto, true)
+	if err != nil {
+		return nil, err
 	}
-	fname := fmt.Sprintf("%x", md5.Sum(buf.Bytes()))
-	wd, _ := os.Getwd()
-	fname = path.Join(wd, "cache", fmt.Sprintf("%s.tar.gz", fname))
+	return CalcDiff(cmpfrom, req)
+}
+
+//PrepareDiff
+func PrepareDiff(rootdir string, cachedir string, diff DiffMap) (string, error) {
+	//concat hash
+	d := md5.New()
+	for _, v := range diff {
+		d.Write([]byte(v.NewHash))
+	}
+	fname := fmt.Sprintf("%x", d.Sum(nil))
+	fname = path.Join(cachedir, fmt.Sprintf("%s.tar.gz", fname))
 	_, err := os.Stat(fname)
-	if err == nil || !os.IsNotExist(err) {
+	if err == nil || os.IsExist(err) {
 		//cache exists
 		return fname, nil
 	}
@@ -107,13 +123,14 @@ func PrepareDiff(rootdir string, diff DiffMap) (string, error) {
 	defer tw.Close()
 
 	for k, v := range diff {
+		fmt.Printf("write %s size:%d\n", k, v.NewSize)
 		fpath := path.Join(rootdir, k)
 		h := new(tar.Header)
 		h.Name = k
 		h.Size = v.NewSize
 		h.Mode = int64(v.Mode)
 		h.ModTime = v.ModTime
-
+		fmt.Printf("write %s\n", fpath)
 		err = tw.WriteHeader(h)
 		if err != nil {
 			return "", err
@@ -122,11 +139,50 @@ func PrepareDiff(rootdir string, diff DiffMap) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		_, err = io.Copy(tw, fr)
+		n, err := io.Copy(tw, fr)
 		if err != nil {
+			fmt.Printf("write bytes:%d, err %v\n", n, err)
 			return "", err
 		}
 	}
 
 	return fname, nil
+}
+
+func ApplyDiff(applydir string, df io.Reader, diff DiffMap) error {
+	// gzip reader
+	gr, err := gzip.NewReader(df)
+	if err != nil {
+		return err
+	}
+	defer gr.Close()
+
+	// tar reader
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			// end of tar archive
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		tofile := filepath.Join(applydir, hdr.Name)
+		os.MkdirAll(filepath.Dir(tofile), 0777)
+		fw, err := os.OpenFile(tofile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(fw, tr); err != nil {
+			return err
+		}
+
+		if di, ok := diff[hdr.Name]; ok {
+			os.Chmod(tofile, di.Mode)
+			os.Chtimes(tofile, di.ModTime, di.ModTime)
+		}
+	}
+	return nil
 }
