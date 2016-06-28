@@ -4,6 +4,9 @@
     "apps" : {
         "client" : {
             "dir": "publish/client"
+        },
+        "app2" : {
+            "dir" : "publish/app2"
         }
     }
 }

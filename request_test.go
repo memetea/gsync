@@ -187,3 +187,32 @@ func Test_ApplyDiff(t *testing.T) {
 	os.RemoveAll(olddir)
 	os.RemoveAll(cachedir)
 }
+
+func Test_FilterIgnore(t *testing.T) {
+	req := &Request{
+		Hashes: make(map[string]string),
+	}
+	req.Hashes["client.exe"] = "123452233"
+	req.Hashes[".autoupdate"] = "321324323131..."
+	req.Hashes["config.txt"] = "hellll"
+	req.Hashes["logs/1.log"] = "log1 content"
+	req.Hashes["logs/2.log"] = "log2 content"
+	req.Hashes["app.log"] = "app log content"
+
+	ignore := []string{"client.exe", ".autoupdate", "logs/*.log"}
+	FilterIgnore(req, ignore)
+
+	if _, ok := req.Hashes["client.exe"]; ok {
+		t.Fatal("client.exe should be filter out")
+	}
+
+	if _, ok := req.Hashes["config.txt"]; !ok {
+		t.Fatal("config.txt should not be filtered out")
+	}
+
+	if len(req.Hashes) != 2 {
+		t.Fatal("unexpected filter result")
+	}
+
+	t.Logf("%v", req.Hashes)
+}

@@ -8,7 +8,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/djherbis/times"
 )
@@ -100,9 +102,34 @@ func copyDir(fromdir string, todir string, overwrite bool) error {
 	return err
 }
 
+func HideFile(path string) error {
+	if runtime.GOOS == "windows" {
+		pname := syscall.StringToUTF16Ptr(path)
+		attrs, err := syscall.GetFileAttributes(pname)
+		if err != nil {
+			return err
+		}
+		attrs = attrs | syscall.FILE_ATTRIBUTE_HIDDEN
+		syscall.SetFileAttributes(pname, attrs)
+	}
+	return nil
+}
+
+func UnHideFile(path string) error {
+	if runtime.GOOS == "windows" {
+		pname := syscall.StringToUTF16Ptr(path)
+		attrs, err := syscall.GetFileAttributes(pname)
+		if err != nil {
+			return err
+		}
+		attrs = attrs & ^uint32(syscall.FILE_ATTRIBUTE_HIDDEN)
+		return syscall.SetFileAttributes(pname, attrs)
+	}
+	return nil
+}
+
 type Request struct {
 	Hashes map[string]string
-	Ignore []string
 }
 
 func makeRequest(stripdir string, curdir string, req *Request, recursive bool) error {
@@ -133,7 +160,6 @@ func makeRequest(stripdir string, curdir string, req *Request, recursive bool) e
 	}
 
 	return nil
-
 }
 
 func MakeRequest(dir string, recursive bool) (*Request, error) {
@@ -146,4 +172,15 @@ func MakeRequest(dir string, recursive bool) (*Request, error) {
 	}
 	err := makeRequest(dir, dir, req, true)
 	return req, err
+}
+
+//FilterIgnore filter out files match the ignore patterns
+func FilterIgnore(req *Request, patterns []string) {
+	for k := range req.Hashes {
+		for _, pattern := range patterns {
+			if ok, err := filepath.Match(pattern, k); ok && err == nil {
+				delete(req.Hashes, k)
+			}
+		}
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type SyncConfig struct {
@@ -18,6 +19,8 @@ type SyncConfig struct {
 	SyncHost   string
 	SyncDir    string `json:"-"`
 	SyncApp    string
+	Ignore     []string
+	LastUpdate time.Time
 }
 
 func usage() {
@@ -38,7 +41,8 @@ func main() {
 
 	wd, _ := os.Getwd()
 	var cnf SyncConfig
-	content, err := ioutil.ReadFile(filepath.Join(wd, ".autoupdate"))
+	autoupdate := filepath.Join(wd, ".autoupdate")
+	content, err := ioutil.ReadFile(autoupdate)
 	if err == nil {
 		json.Unmarshal(content, &config)
 	}
@@ -57,33 +61,34 @@ func main() {
 			config.SyncApp = filepath.Base(wd)
 		}
 	}
-	if config.SyncDetail {
-		log.Printf("sync config:%#v\n", config)
-	}
+
 	if len(config.SyncHost) == 0 {
 		usage()
 		return
 	}
-
+	if config.SyncDetail {
+		log.Printf("%s\n", content)
+	}
 	req, err := gsync.MakeRequest(config.SyncDir, true)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if config.SyncDetail {
-		log.Printf("req:%v\n", req)
-	}
+	gsync.FilterIgnore(req, config.Ignore)
+
 	//check update
-	params := &url.Values{}
 	content, err = json.Marshal(req)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	requrl := fmt.Sprintf("http://%s/hasupdate/%s", config.SyncHost, config.SyncApp)
 	if config.SyncDetail {
-		log.Printf("request %s\n", requrl)
+		log.Printf("request %s. param:%s\n", requrl, content)
 	}
-	params.Set("req", string(content))
 	resp, err := http.PostForm(requrl, url.Values{"req": {string(content)}})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	content, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -107,10 +112,10 @@ func main() {
 	if len(gresp.Diff) == 0 {
 		//no update
 		log.Printf("update to date\n")
-		return
+		goto L
 	}
 
-	//get patch file
+	//get diff file
 	requrl = fmt.Sprintf("http://%s%s", config.SyncHost, gresp.PatchFile)
 	if config.SyncDetail {
 		log.Printf("request %s\n", requrl)
@@ -125,6 +130,20 @@ func main() {
 		log.Fatal(err)
 	}
 	resp.Body.Close()
+	config.LastUpdate = time.Now()
 	log.Printf("update success.")
-	//filepath.Join(wd, ".autoupdate")
+
+L:
+	content, err = json.Marshal(config)
+	if err == nil {
+		gsync.UnHideFile(autoupdate)
+		err = ioutil.WriteFile(autoupdate, content, 0777)
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = gsync.HideFile(autoupdate)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 }
