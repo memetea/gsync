@@ -8,9 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
 
 	"github.com/djherbis/times"
 )
@@ -100,32 +98,6 @@ func copyDir(fromdir string, todir string, overwrite bool) error {
 		return copyFile(path, fto, overwrite)
 	})
 	return err
-}
-
-func HideFile(path string) error {
-	if runtime.GOOS == "windows" {
-		pname := syscall.StringToUTF16Ptr(path)
-		attrs, err := syscall.GetFileAttributes(pname)
-		if err != nil {
-			return err
-		}
-		attrs = attrs | syscall.FILE_ATTRIBUTE_HIDDEN
-		syscall.SetFileAttributes(pname, attrs)
-	}
-	return nil
-}
-
-func UnHideFile(path string) error {
-	if runtime.GOOS == "windows" {
-		pname := syscall.StringToUTF16Ptr(path)
-		attrs, err := syscall.GetFileAttributes(pname)
-		if err != nil {
-			return err
-		}
-		attrs = attrs & ^uint32(syscall.FILE_ATTRIBUTE_HIDDEN)
-		return syscall.SetFileAttributes(pname, attrs)
-	}
-	return nil
 }
 
 type Request struct {

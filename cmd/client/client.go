@@ -67,7 +67,7 @@ func main() {
 		return
 	}
 	if config.SyncDetail {
-		log.Printf("%s\n", content)
+		log.Printf("sync app(%s) from %s\n", config.SyncApp, config.SyncHost)
 	}
 	req, err := gsync.MakeRequest(config.SyncDir, true)
 	if err != nil {
@@ -118,7 +118,7 @@ func main() {
 	//get diff file
 	requrl = fmt.Sprintf("http://%s%s", config.SyncHost, gresp.PatchFile)
 	if config.SyncDetail {
-		log.Printf("request %s\n", requrl)
+		log.Printf("download %s\n", requrl)
 	}
 	resp, err = http.Get(requrl)
 	if err != nil {

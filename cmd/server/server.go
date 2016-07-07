@@ -27,8 +27,12 @@ var config Config
 
 func main() {
 	//read config
-	wd, _ := os.Getwd()
-	content, err := ioutil.ReadFile(filepath.Join(wd, "config.txt"))
+	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	os.Chdir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	content, err := ioutil.ReadFile(filepath.Join(dir, "config.txt"))
 	if err != nil {
 		log.Fatal(err)
 	}

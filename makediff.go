@@ -178,7 +178,7 @@ func ApplyDiff(applydir string, df io.Reader, diff DiffMap) error {
 		if _, err := io.Copy(fw, tr); err != nil {
 			return err
 		}
-
+		fw.Close()
 		if di, ok := diff[hdr.Name]; ok {
 			os.Chmod(tofile, di.Mode)
 			os.Chtimes(tofile, di.ModTime, di.ModTime)
