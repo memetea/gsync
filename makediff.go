@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -149,16 +150,20 @@ func PrepareDiff(rootdir string, cachedir string, diff DiffMap) (string, error) 
 	return fname, nil
 }
 
-func ApplyDiff(applydir string, df io.Reader, diff DiffMap) error {
+func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) (int, error) {
 	// gzip reader
 	gr, err := gzip.NewReader(df)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer gr.Close()
-
 	// tar reader
 	tr := tar.NewReader(gr)
+	//clean path
+	for i, s := range ignore {
+		ignore[i] = strings.Replace(filepath.Clean(s), "\\", "/", -1)
+	}
+	counter := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -166,23 +171,52 @@ func ApplyDiff(applydir string, df io.Reader, diff DiffMap) error {
 			break
 		}
 		if err != nil {
-			return err
+			return 0, err
 		}
 
 		tofile := filepath.Join(applydir, hdr.Name)
 		os.MkdirAll(filepath.Dir(tofile), 0777)
+		//check ignore
+		skip := false
+		for _, ignoreFile := range ignore {
+			if match, err := filepath.Match(ignoreFile, hdr.Name); err == nil && match {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			//do not overwrite existing file marked as ignore
+			if _, err = os.Stat(tofile); err == nil {
+				continue
+			}
+		}
+
 		fw, err := os.OpenFile(tofile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0)
 		if err != nil {
-			return err
+			//try rename file and reopen
+			err = os.Rename(tofile, tofile+".autoupdatetmpfile")
+			if err != nil {
+				return 0, err
+			}
+			fw, err = os.OpenFile(tofile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0)
+			if err != nil {
+				os.Rename(tofile+".autoupdatetmpfile", tofile)
+				return 0, err
+			}
+
+			HideFile(tofile + ".autoupdatetmpfile")
 		}
+
+		log.Printf("overwrite:%s\n", tofile)
 		if _, err := io.Copy(fw, tr); err != nil {
-			return err
+			return 0, err
 		}
 		fw.Close()
 		if di, ok := diff[hdr.Name]; ok {
 			os.Chmod(tofile, di.Mode)
 			os.Chtimes(tofile, di.ModTime, di.ModTime)
 		}
+		counter++
 	}
-	return nil
+	return counter, nil
 }

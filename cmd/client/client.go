@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -10,56 +11,89 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 )
 
 type SyncConfig struct {
-	SyncDetail bool `json:"-"`
-	SyncHost   string
-	SyncDir    string `json:"-"`
-	SyncApp    string
-	Ignore     []string
-	LastUpdate time.Time
+	SyncDetail  bool `json:"-"`
+	SyncCounter int  `json:"-"`
+	SyncHost    string
+	SyncDir     string `json:"-"`
+	SyncApp     string
+	Ignore      []string
 }
 
 func usage() {
-	fmt.Printf("usage:\n\tclient --host=[host] --dir=[dir] --app=[app]\n")
+	fileName := filepath.Base(os.Args[0])
+	fmt.Printf("usage:\n%s --host=[host] --dir=[dir] --app=[app]\n", fileName)
+}
+
+func cleanTmpFiles(dir string) error {
+	fis, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, fi := range fis {
+		fname := fi.Name()
+		if !fi.IsDir() {
+			if path.Ext(fname) == ".autoupdatetmpfile" {
+				err = os.Remove(path.Join(dir, fname))
+				if err != nil {
+					return err
+				}
+			}
+		} else if fname != "." && fname != ".." {
+			err = cleanTmpFiles(path.Join(dir, fname))
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 var config SyncConfig
+var host, dir, app string
+var checkUpdate bool
 
 func main() {
+	defer func() {
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Println("press any key to exit")
+		_, _ = reader.ReadByte()
+	}()
+
 	flag.BoolVar(&config.SyncDetail, "v", false, "show detail info")
-	flag.StringVar(&config.SyncHost, "host", "", "sync server")
-	flag.StringVar(&config.SyncHost, "h", "", "sync server")
-	flag.StringVar(&config.SyncDir, "dir", "", "sync dir")
-	flag.StringVar(&config.SyncDir, "d", "", "sync dir")
-	flag.StringVar(&config.SyncApp, "app", "", "sync app")
-	flag.StringVar(&config.SyncApp, "a", "", "sync app")
+	flag.StringVar(&host, "host", "", "sync server")
+	flag.StringVar(&dir, "dir", "", "sync dir")
+	flag.StringVar(&app, "app", "", "sync app")
+	flag.BoolVar(&checkUpdate, "check", false, "check update")
 	flag.Parse()
 
-	wd, _ := os.Getwd()
-	var cnf SyncConfig
+	wd := filepath.Dir(os.Args[0])
 	autoupdate := filepath.Join(wd, ".autoupdate")
 	content, err := ioutil.ReadFile(autoupdate)
 	if err == nil {
 		json.Unmarshal(content, &config)
 	}
 
-	if len(config.SyncHost) == 0 {
-		//try parse from .autoupdate
-		config.SyncHost = cnf.SyncHost
+	//overwrite with command line arguments
+	if len(host) > 0 {
+		config.SyncHost = host
+	}
+	if len(dir) > 0 {
+		config.SyncDir = dir
 	}
 	if len(config.SyncDir) == 0 {
 		config.SyncDir = wd
 	}
+	if len(app) > 0 {
+		config.SyncApp = app
+	}
 	if len(config.SyncApp) == 0 {
-		if len(cnf.SyncApp) > 0 {
-			config.SyncApp = cnf.SyncApp
-		} else {
-			config.SyncApp = filepath.Base(wd)
-		}
+		config.SyncApp = filepath.Base(wd)
 	}
 
 	if len(config.SyncHost) == 0 {
@@ -69,6 +103,13 @@ func main() {
 	if config.SyncDetail {
 		log.Printf("sync app(%s) from %s\n", config.SyncApp, config.SyncHost)
 	}
+
+	//clean autoupdatetmpfiles
+	err = cleanTmpFiles(config.SyncDir)
+	if err != nil {
+		log.Println(err)
+	}
+
 	req, err := gsync.MakeRequest(config.SyncDir, true)
 	if err != nil {
 		log.Fatal(err)
@@ -111,29 +152,48 @@ func main() {
 
 	if len(gresp.Diff) == 0 {
 		//no update
-		log.Printf("update to date\n")
+		log.Printf("up to date\n")
 		goto L
+	} else {
+		if checkUpdate {
+			log.Printf("has update:%s", gresp.PatchFile)
+			goto L
+		}
 	}
 
 	//get diff file
 	requrl = fmt.Sprintf("http://%s%s", config.SyncHost, gresp.PatchFile)
 	if config.SyncDetail {
-		log.Printf("download %s\n", requrl)
+		log.Printf("downloading %s\n", requrl)
 	}
 	resp, err = http.Get(requrl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = gsync.ApplyDiff(config.SyncDir, resp.Body, gresp.Diff)
+	config.SyncCounter, err = gsync.ApplyDiff(config.SyncDir, resp.Body, gresp.Diff, config.Ignore)
 	if err != nil {
 		log.Fatal(err)
 	}
 	resp.Body.Close()
-	config.LastUpdate = time.Now()
-	log.Printf("update success.")
+	if config.SyncCounter > 0 {
+		log.Printf("update successfully\n")
+		//set access time and modify time to mark updated
+		os.Chtimes(autoupdate, time.Now(), time.Now())
+	} else {
+		log.Printf("up to date\n")
+	}
 
 L:
+	content, err = ioutil.ReadFile(autoupdate)
+	if err == nil {
+		var latestConfig SyncConfig
+		if err == nil {
+			json.Unmarshal(content, &latestConfig)
+		}
+		config.Ignore = latestConfig.Ignore
+	}
+
 	content, err = json.Marshal(config)
 	if err == nil {
 		gsync.UnHideFile(autoupdate)
