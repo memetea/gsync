@@ -119,11 +119,24 @@ func Test_CopyDir(t *testing.T) {
 func Test_MakeRequest(t *testing.T) {
 	wd, _ := os.Getwd()
 
-	req, err := MakeRequest(path.Join(wd, "testdata/old"), true)
+	// match, err := filepath.Match("shouldbeignore/*", "shouldbeignore/subdir/1.txt")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	// if !match {
+	// 	t.Fatal("expect match")
+	// }
+
+	ignore := []string{"shouldbeignore/*"}
+
+	req, err := MakeRequest(path.Join(wd, "testdata/old"), ignore, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(req.Hashes) != 4 {
+		for k := range req.Hashes {
+			t.Logf("key:%s", k)
+		}
 		t.Fatalf("expect 4 file info. got %d", len(req.Hashes))
 	}
 	content, err := json.Marshal(req)
@@ -171,7 +184,7 @@ func Test_ApplyDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer df.Close()
-	err = ApplyDiff(olddir, df, diffMap)
+	_, err = ApplyDiff(olddir, df, diffMap, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

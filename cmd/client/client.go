@@ -110,11 +110,10 @@ func main() {
 		log.Println(err)
 	}
 
-	req, err := gsync.MakeRequest(config.SyncDir, true)
+	req, err := gsync.MakeRequest(config.SyncDir, config.Ignore, true)
 	if err != nil {
 		log.Fatal(err)
 	}
-	gsync.FilterIgnore(req, config.Ignore)
 
 	//check update
 	content, err = json.Marshal(req)

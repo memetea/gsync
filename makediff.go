@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -84,7 +83,7 @@ func CalcDiff(cmpdir string, req *Request) (DiffMap, error) {
 
 func CalcDiffOnFolders(cmpfrom string, cmpto string) (DiffMap, error) {
 	//calc request on cmpfrom
-	req, err := MakeRequest(cmpto, true)
+	req, err := MakeRequest(cmpto, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -124,14 +123,14 @@ func PrepareDiff(rootdir string, cachedir string, diff DiffMap) (string, error) 
 	defer tw.Close()
 
 	for k, v := range diff {
-		fmt.Printf("write %s size:%d\n", k, v.NewSize)
+		//fmt.Printf("write %s size:%d\n", k, v.NewSize)
 		fpath := path.Join(rootdir, k)
 		h := new(tar.Header)
 		h.Name = k
 		h.Size = v.NewSize
 		h.Mode = int64(v.Mode)
 		h.ModTime = v.ModTime
-		fmt.Printf("write %s\n", fpath)
+		//fmt.Printf("write %s\n", fpath)
 		err = tw.WriteHeader(h)
 		if err != nil {
 			return "", err
@@ -207,7 +206,7 @@ func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) (in
 			HideFile(tofile + ".autoupdatetmpfile")
 		}
 
-		log.Printf("overwrite:%s\n", tofile)
+		//log.Printf("overwrite:%s\n", tofile)
 		if _, err := io.Copy(fw, tr); err != nil {
 			return 0, err
 		}

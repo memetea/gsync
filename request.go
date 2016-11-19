@@ -122,19 +122,14 @@ func makeRequest(stripdir string, curdir string, req *Request, recursive bool) e
 			}
 			continue
 		}
-
-		contents, err := ioutil.ReadFile(fiPath)
-		if err != nil {
-			return fmt.Errorf("read file %s err:%v", fiPath, err)
-		}
 		fiPath = strings.Replace(fiPath, stripdir, "", -1)
-		req.Hashes[fiPath] = fmt.Sprintf("%x", md5.Sum(contents))
+		req.Hashes[fiPath] = ""
 	}
 
 	return nil
 }
 
-func MakeRequest(dir string, recursive bool) (*Request, error) {
+func MakeRequest(dir string, ignores []string, recursive bool) (*Request, error) {
 	req := &Request{
 		Hashes: make(map[string]string),
 	}
@@ -143,6 +138,27 @@ func MakeRequest(dir string, recursive bool) (*Request, error) {
 		dir = dir + "/"
 	}
 	err := makeRequest(dir, dir, req, true)
+	if err != nil {
+		return nil, err
+	}
+	for k := range req.Hashes {
+		for _, pattern := range ignores {
+			if ok, err := filepath.Match(pattern, k); ok && err == nil {
+				delete(req.Hashes, k)
+			}
+		}
+	}
+
+	//calc hash
+	for k := range req.Hashes {
+		fname := filepath.Join(dir, k)
+		contents, err := ioutil.ReadFile(fname)
+		if err != nil {
+			return nil, fmt.Errorf("read file %s err:%v", fname, err)
+		}
+		req.Hashes[k] = fmt.Sprintf("%x", md5.Sum(contents))
+	}
+
 	return req, err
 }
 
