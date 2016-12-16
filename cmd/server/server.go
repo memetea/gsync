@@ -82,7 +82,7 @@ func main() {
 		if len(diff) != 0 {
 			resp.PatchFile, err = gsync.PrepareDiff(app.AppDir, config.CacheDir, diff)
 			if err != nil {
-				http.Error(w, "prepare diff error", 500)
+				http.Error(w, fmt.Sprintf("prepare diff error:%s", err), 500)
 				return
 			}
 			fi, err := os.Stat(resp.PatchFile)

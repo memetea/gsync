@@ -149,11 +149,12 @@ func PrepareDiff(rootdir string, cachedir string, diff DiffMap) (string, error) 
 	return fname, nil
 }
 
-func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) (int, error) {
+func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) ([]string, error) {
+	updates := make([]string, 0)
 	// gzip reader
 	gr, err := gzip.NewReader(df)
 	if err != nil {
-		return 0, err
+		return updates, err
 	}
 	defer gr.Close()
 	// tar reader
@@ -162,7 +163,7 @@ func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) (in
 	for i, s := range ignore {
 		ignore[i] = strings.Replace(filepath.Clean(s), "\\", "/", -1)
 	}
-	counter := 0
+
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -170,7 +171,7 @@ func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) (in
 			break
 		}
 		if err != nil {
-			return 0, err
+			return updates, err
 		}
 
 		tofile := filepath.Join(applydir, hdr.Name)
@@ -195,12 +196,12 @@ func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) (in
 			//try rename file and reopen
 			err = os.Rename(tofile, tofile+".autoupdatetmpfile")
 			if err != nil {
-				return 0, err
+				return updates, err
 			}
 			fw, err = os.OpenFile(tofile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0)
 			if err != nil {
 				os.Rename(tofile+".autoupdatetmpfile", tofile)
-				return 0, err
+				return updates, err
 			}
 
 			HideFile(tofile + ".autoupdatetmpfile")
@@ -208,14 +209,14 @@ func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) (in
 
 		//log.Printf("overwrite:%s\n", tofile)
 		if _, err := io.Copy(fw, tr); err != nil {
-			return 0, err
+			return updates, err
 		}
 		fw.Close()
 		if di, ok := diff[hdr.Name]; ok {
 			os.Chmod(tofile, di.Mode)
 			os.Chtimes(tofile, di.ModTime, di.ModTime)
 		}
-		counter++
+		updates = append(updates, tofile)
 	}
-	return counter, nil
+	return updates, nil
 }

@@ -152,11 +152,11 @@ func main() {
 	if len(gresp.Diff) == 0 {
 		//no update
 		log.Printf("up to date\n")
-		goto L
+		return
 	} else {
 		if checkUpdate {
 			log.Printf("has update:%s", gresp.PatchFile)
-			goto L
+			return
 		}
 	}
 
@@ -170,39 +170,21 @@ func main() {
 		log.Fatal(err)
 	}
 
-	config.SyncCounter, err = gsync.ApplyDiff(config.SyncDir, resp.Body, gresp.Diff, config.Ignore)
+	updates, err := gsync.ApplyDiff(config.SyncDir, resp.Body, gresp.Diff, config.Ignore)
 	if err != nil {
 		log.Fatal(err)
 	}
 	resp.Body.Close()
-	if config.SyncCounter > 0 {
+	if len(updates) > 0 {
+		if config.SyncDetail {
+			for _, u := range updates {
+				log.Printf("%s updated\r\n", u)
+			}
+		}
 		log.Printf("update successfully\n")
 		//set access time and modify time to mark updated
 		os.Chtimes(autoupdate, time.Now(), time.Now())
 	} else {
 		log.Printf("up to date\n")
-	}
-
-L:
-	content, err = ioutil.ReadFile(autoupdate)
-	if err == nil {
-		var latestConfig SyncConfig
-		if err == nil {
-			json.Unmarshal(content, &latestConfig)
-		}
-		config.Ignore = latestConfig.Ignore
-	}
-
-	content, err = json.Marshal(config)
-	if err == nil {
-		gsync.UnHideFile(autoupdate)
-		err = ioutil.WriteFile(autoupdate, content, 0777)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = gsync.HideFile(autoupdate)
-		if err != nil {
-			log.Fatal(err)
-		}
 	}
 }
