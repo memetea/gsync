@@ -24,7 +24,7 @@ sample client config(file named .autoconfig and  under the same directory where 
 	"LastUpdate":"2016-06-28T10:29:34.8880669+08:00"
 }
 ```
-
+ 
 
 sample server config:
 ```
