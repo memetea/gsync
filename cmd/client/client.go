@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/md5"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,7 +14,15 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
+)
+
+var (
+	wd          string
+	config      SyncConfig
+	checkUpdate bool
 )
 
 type SyncConfig struct {
@@ -54,11 +63,9 @@ func cleanTmpFiles(dir string) error {
 	return nil
 }
 
-var config SyncConfig
-var host, dir, app string
-var checkUpdate bool
-
 func main() {
+	wd = filepath.Dir(os.Args[0])
+
 	defer func() {
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("press any key to exit")
@@ -66,39 +73,24 @@ func main() {
 	}()
 
 	flag.BoolVar(&config.SyncDetail, "v", false, "show detail info")
-	flag.StringVar(&host, "host", "", "sync server")
-	flag.StringVar(&dir, "dir", "", "sync dir")
-	flag.StringVar(&app, "app", "", "sync app")
+	flag.StringVar(&config.SyncHost, "host", "", "sync server")
+	flag.StringVar(&config.SyncDir, "dir", "", "sync dir")
+	flag.StringVar(&config.SyncApp, "app", "", "sync app")
 	flag.BoolVar(&checkUpdate, "check", false, "check update")
 	flag.Parse()
 
-	wd := filepath.Dir(os.Args[0])
 	autoupdate := filepath.Join(wd, ".autoupdate")
 	content, err := ioutil.ReadFile(autoupdate)
 	if err == nil {
 		json.Unmarshal(content, &config)
 	}
 
-	//overwrite with command line arguments
-	if len(host) > 0 {
-		config.SyncHost = host
-	}
-	if len(dir) > 0 {
-		config.SyncDir = dir
-	}
-	if len(config.SyncDir) == 0 {
-		config.SyncDir = wd
-	}
-	if len(app) > 0 {
-		config.SyncApp = app
-	}
-	if len(config.SyncApp) == 0 {
-		config.SyncApp = filepath.Base(wd)
-	}
-
 	if len(config.SyncHost) == 0 {
 		usage()
 		return
+	}
+	if len(config.SyncDir) == 0 {
+		config.SyncDir = wd
 	}
 	if config.SyncDetail {
 		log.Printf("sync app(%s) from %s\n", config.SyncApp, config.SyncHost)
@@ -114,6 +106,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	req.ClientVersion = 2
 
 	//check update
 	content, err = json.Marshal(req)
@@ -155,35 +148,68 @@ func main() {
 		return
 	} else {
 		if checkUpdate {
-			log.Printf("has update:%s", gresp.PatchFile)
+			var totalSize int64
+			for _, d := range gresp.Diff {
+				totalSize += d.NewSize
+			}
+			log.Printf("has update. files:%d, size:%d", len(gresp.Diff), totalSize)
 			return
 		}
 	}
 
-	//get diff file
-	requrl = fmt.Sprintf("http://%s%s", config.SyncHost, gresp.PatchFile)
-	if config.SyncDetail {
-		log.Printf("downloading %s\n", requrl)
-	}
-	resp, err = http.Get(requrl)
-	if err != nil {
-		log.Fatal(err)
-	}
+	//download files
+	var upCount int32
+	if len(gresp.Diff) > 0 {
+		var wg sync.WaitGroup
+		for fname, diff := range gresp.Diff {
+			wg.Add(1)
+			go func(fname string, d gsync.Diff) {
+				defer wg.Done()
+				//get diff file
+				requrl := fmt.Sprintf("http://%s/app/%s/%s", config.SyncHost, config.SyncApp, fname)
+				if config.SyncDetail {
+					log.Printf("downloading %s\n", requrl)
+				}
+				resp, err := http.Get(requrl)
+				if err != nil {
+					log.Printf("get url error:%s", err)
+					return
+				}
 
-	updates, err := gsync.ApplyDiff(config.SyncDir, resp.Body, gresp.Diff, config.Ignore)
-	if err != nil {
-		log.Fatal(err)
-	}
-	resp.Body.Close()
-	if len(updates) > 0 {
-		if config.SyncDetail {
-			for _, u := range updates {
-				log.Printf("%s updated\r\n", u)
-			}
+				fileContent, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					log.Printf("read response error:%v", err)
+					return
+				}
+
+				if resp.StatusCode != http.StatusOK {
+					log.Printf("download %s failed: statusCode=%d, response=%s",
+						fname, resp.StatusCode, fileContent)
+					return
+				}
+
+				newHash := fmt.Sprintf("%x", md5.Sum(fileContent))
+				if newHash != d.NewHash {
+					log.Printf("file %s hash check failed. expect %s, got %s", fname, d.NewHash, newHash)
+					return
+				}
+				err = gsync.ReplaceFile(fileContent, filepath.Join(wd, fname), d.Mode, d.ModTime)
+				if err != nil {
+					log.Printf("replace file error:%v", err)
+					return
+				}
+				atomic.AddInt32(&upCount, 1)
+			}(fname, diff)
 		}
-		log.Printf("update successfully\n")
-		//set access time and modify time to mark updated
-		os.Chtimes(autoupdate, time.Now(), time.Now())
+
+		wg.Wait()
+
+		if int(upCount) == len(gresp.Diff) {
+			os.Chtimes(autoupdate, time.Now(), time.Now())
+			log.Printf("update successfully\n")
+		} else {
+			log.Printf("update failed. %d of %d was updated\n", upCount, len(gresp.Diff))
+		}
 	} else {
 		log.Printf("up to date\n")
 	}

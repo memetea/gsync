@@ -1,9 +1,11 @@
 package gsync
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -228,4 +230,41 @@ func Test_FilterIgnore(t *testing.T) {
 	}
 
 	t.Logf("%v", req.Hashes)
+}
+
+func TestHotCache(t *testing.T) {
+	cache := CreateCache(10)
+	value := []byte{0, 1, 2, 3, 4, 5}
+	cache.AddItem("file1", value, 24*time.Hour)
+	value2, ok := cache.GetBytes("file1")
+	if !ok {
+		t.Fatal("get from cache failed")
+	}
+	if !bytes.Equal(value2, value) {
+		t.Fatal("cache not match")
+	}
+}
+
+func TestDebounceChan(t *testing.T) {
+	in, out := DebouncePipeChan(2 * time.Second)
+	go func() {
+		for i := 0; i < 10; i++ {
+			in <- i
+			log.Printf("input %d", i)
+			time.Sleep(1 * time.Second)
+		}
+		close(in)
+	}()
+
+	var sum int
+	for {
+		v, ok := <-out
+		if !ok {
+			break
+		}
+		log.Printf("get %v", v)
+		sum += v.(int)
+	}
+
+	log.Printf("sum=%d", sum)
 }

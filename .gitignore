@@ -1,3 +1,5 @@
 cache
 .vscode
 *.exe
+cmd/server/publish
+cmd/server/release

@@ -101,7 +101,8 @@ func copyDir(fromdir string, todir string, overwrite bool) error {
 }
 
 type Request struct {
-	Hashes map[string]string
+	ClientVersion int
+	Hashes        map[string]string
 }
 
 func makeRequest(stripdir string, curdir string, req *Request, recursive bool) error {

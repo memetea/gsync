@@ -2,6 +2,7 @@ package gsync
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/md5"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 //Diff Describes a difference between two files
 type Diff struct {
+	Name    string
 	NewHash string
 	OldHash string
 	NewSize int64
@@ -147,6 +149,35 @@ func PrepareDiff(rootdir string, cachedir string, diff DiffMap) (string, error) 
 	}
 
 	return fname, nil
+}
+
+func ReplaceFile(src []byte, dst string, mode os.FileMode, modTime time.Time) error {
+	dir, _ := filepath.Split(dst)
+	os.MkdirAll(dir, 0777)
+	fw, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0)
+	if err != nil {
+		//try rename file and reopen
+		err = os.Rename(dst, dst+".autoupdatetmpfile")
+		if err != nil {
+			return err
+		}
+		fw, err = os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0)
+		if err != nil {
+			os.Rename(dst+".autoupdatetmpfile", dst)
+			return err
+		}
+
+		HideFile(dst + ".autoupdatetmpfile")
+	}
+
+	//log.Printf("overwrite:%s\n", dst)
+	if _, err := io.Copy(fw, bytes.NewReader(src)); err != nil {
+		return err
+	}
+	fw.Close()
+	os.Chmod(dst, mode)
+	os.Chtimes(dst, modTime, modTime)
+	return nil
 }
 
 func ApplyDiff(applydir string, df io.Reader, diff DiffMap, ignore []string) ([]string, error) {
